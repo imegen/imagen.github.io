@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Foto automática</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #111; color: #eee; text-align: center; }
+  h1 { font-size: 1.3rem; margin: 8px 0; }
+  #status { margin: 12px 0; min-height: 1.4em; color: #9cf; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .shot { background: #222; border-radius: 12px; padding: 10px; }
+  .shot img { width: 100%; border-radius: 8px; display: block; }
+  .shot p { margin: 8px 0; font-weight: bold; }
+  a.btn, button.btn {
+    display: inline-block; margin: 6px; padding: 10px 16px; border: 0; border-radius: 8px;
+    background: #3b82f6; color: #fff; font-size: 1rem; text-decoration: none; cursor: pointer;
+  }
+  video { display: none; }
+</style>
+</head>
+<body>
+<h1>Foto automática</h1>
+<div id="status">Preparando câmera...</div>
+<div class="grid" id="shots"></div>
+<button id="retry" class="btn" style="display:none">Tentar novamente</button>
+
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas" style="display:none"></canvas>
+
+<script>
+const statusEl = document.getElementById('status');
+const shotsEl = document.getElementById('shots');
+const retryBtn = document.getElementById('retry');
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+
+const CAMERAS = [
+  { label: 'Frontal', facingMode: 'user' },
+  { label: 'Traseira', facingMode: 'environment' }
+];
+
+function setStatus(text) { statusEl.textContent = text; }
+function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function captureCamera(cam) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: cam.facingMode } },
+    audio: false
+  });
+  try {
+    video.srcObject = stream;
+    await video.play();
+    // Dá tempo para a câmera ajustar foco e exposição
+    await wait(1200);
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) throw new Error('Frame vazio');
+    return blob;
+  } finally {
+    stream.getTracks().forEach(track => track.stop());
+    video.srcObject = null;
+  }
+}
+
+function addShot(cam, blob) {
+  const url = URL.createObjectURL(blob);
+  const fileName = `foto-${cam.facingMode === 'user' ? 'frontal' : 'traseira'}-${Date.now()}.jpg`;
+  const card = document.createElement('div');
+  card.className = 'shot';
+  card.innerHTML =
+    `<p>${cam.label}</p>` +
+    `<img src="${url}" alt="Foto ${cam.label}">` +
+    `<br><a class="btn" href="${url}" download="${fileName}">Baixar</a>`;
+  shotsEl.appendChild(card);
+}
+
+async function run() {
+  shotsEl.innerHTML = '';
+  retryBtn.style.display = 'none';
+  try {
+    for (const cam of CAMERAS) {
+      setStatus(`Tirando foto (${cam.label.toLowerCase()})...`);
+      const blob = await captureCamera(cam);
+      addShot(cam, blob);
+    }
+    setStatus('Pronto! As duas fotos foram tiradas.');
+  } catch (err) {
+    console.error(err);
+    setStatus('Não foi possível usar a câmera (' + (err.name || err.message) + '). Permita o acesso à câmera e toque em "Tentar novamente".');
+    retryBtn.style.display = 'inline-block';
+  }
+}
+
+retryBtn.addEventListener('click', run);
+window.addEventListener('load', run);
+</script>
+</body>
+</html>
